@@ -7,9 +7,25 @@ import { Textarea } from './ui/textarea';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
 import { getFfmpeg } from '@/lib/ffmpeg';
+import { api } from '@/lib/axios';
 
-export function VideoInputForm() {
+type Status ='waiting' | 'converting' |'uploading' | 'generating' | 'success';
+
+const statusMessage = {
+  'converting': 'Convertendo...',
+  'generating': 'Transcrevendo...',
+  'uploading': 'Enviando...',
+  'success': 'Sucesso!',
+}
+
+interface VideoInputFormProps {
+  onVideoUploaded: (videoId: string) => void
+}
+
+export function VideoInputForm({ onVideoUploaded }: VideoInputFormProps) {
   const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [status, setStatus] = useState<Status>('waiting')
+
   const promptInputRef = useRef<HTMLTextAreaElement>(null);
 
   async function convertVideoToAudio(video: File): Promise<File> {
@@ -42,9 +58,6 @@ export function VideoInputForm() {
       type: 'audio/mpeg'
     });
 
-
-    console.log('conversion finished');
-
     return audioFile;
   }
 
@@ -56,7 +69,7 @@ export function VideoInputForm() {
     }
 
     const selectedFile = files[0];
-    setVideoFile(selectedFile)
+    setVideoFile(selectedFile);
   }
 
   async function handleUploadVideo(event: FormEvent<HTMLFormElement>) {
@@ -66,10 +79,29 @@ export function VideoInputForm() {
 
     if(!videoFile) return;
 
+    setStatus('converting');
+
     const audioFile = await convertVideoToAudio(videoFile);
 
-    console.log(audioFile);
+    const data = new FormData();
 
+    data.append('file', audioFile);
+
+    setStatus('uploading')
+
+    const response = await api.post('/videos', data);
+
+    const videoId = response.data.video.id;
+
+    setStatus('generating')
+
+    await api.post(`/videos/${videoId}/transcription`, {
+      prompt
+    });
+
+    setStatus('success');
+
+    onVideoUploaded(videoId);
   }
 
   const previewUrl = useMemo(() => {
@@ -112,15 +144,26 @@ export function VideoInputForm() {
         <Label htmlFor="transcription_prompt">Prompt de transcrição</Label>
         <Textarea
           ref={promptInputRef}
+          disabled={status !== 'waiting'}
           placeholder="Inclua palavras-chave mencionadas no vídeo separadas por vírgula (,)"
           id="transcription_prompt"
           className="h-20 leading-relaxed resize-none"
         />
       </div>
 
-      <Button type="submit" className="w-full">
-        Carregar vídeo
-        <Upload className="w-4 h-4 ml-2" />
+      <Button
+        data-success={status === 'success'}
+        disabled={status !== 'waiting'}
+        type="submit"
+        className="w-full data-[success=true]:bg-emerald-500 data-[success=true]:text-black">
+        {status === 'waiting' ? (
+          <>
+            Carregar vídeo
+            <Upload className="w-4 h-4 ml-2" />
+          </>
+        ): (
+          statusMessage[status]
+        )}
       </Button>
     </form>
   )
